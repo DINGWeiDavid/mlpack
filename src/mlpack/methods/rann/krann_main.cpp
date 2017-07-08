@@ -11,6 +11,7 @@
  * http://www.opensource.org/licenses/BSD-3-Clause for more information.
  */
 #include <mlpack/prereqs.hpp>
+#include <mlpack/core/util/cli.hpp>
 
 #include "ra_search.hpp"
 #include "ra_model.hpp"
@@ -22,15 +23,18 @@ using namespace mlpack::neighbor;
 using namespace mlpack::tree;
 using namespace mlpack::metric;
 
+// Convenience typedef.
+typedef RAModel<NearestNeighborSort> RANNModel;
+
 // Information about the program itself.
 PROGRAM_INFO("K-Rank-Approximate-Nearest-Neighbors (kRANN)",
     "This program will calculate the k rank-approximate-nearest-neighbors of a "
     "set of points. You may specify a separate set of reference points and "
     "query points, or just a reference set which will be used as both the "
-    "reference and query set. You must specify the rank approximation (in \%) "
+    "reference and query set. You must specify the rank approximation (in %) "
     "(and optionally the success probability)."
     "\n\n"
-    "For example, the following will return 5 neighbors from the top 0.1\% of "
+    "For example, the following will return 5 neighbors from the top 0.1% of "
     "the data (with probability 0.95) for each point in 'input.csv' and store "
     "the distances in 'distances.csv' and the neighbors in the file "
     "'neighbors.csv':"
@@ -55,10 +59,9 @@ PARAM_MATRIX_OUT("distances", "Matrix to output distances into.", "d");
 PARAM_UMATRIX_OUT("neighbors", "Matrix to output neighbors into.", "n");
 
 // The option exists to load or save models.
-PARAM_STRING_IN("input_model_file", "File containing pre-trained kNN model.",
-    "m", "");
-PARAM_STRING_OUT("output_model_file", "If specified, the kNN model will be "
-    "saved to the given file.", "M");
+PARAM_MODEL_IN(RANNModel, "input_model", "Pre-trained kNN model.", "m");
+PARAM_MODEL_OUT(RANNModel, "output_model", "If specified, the kNN model will be"
+    " output here.", "M");
 
 // The user may specify a query file of query points and a number of nearest
 // neighbors to search for.
@@ -91,9 +94,6 @@ PARAM_FLAG("first_leaf_exact", "The flag to trigger sampling only after "
 PARAM_INT_IN("single_sample_limit", "The limit on the maximum number of "
     "samples (and hence the largest node you can approximate).", "z", 20);
 
-// Convenience typedef.
-typedef RAModel<NearestNeighborSort> RANNModel;
-
 int main(int argc, char *argv[])
 {
   // Give CLI the command line parameters the user passed in.
@@ -102,17 +102,17 @@ int main(int argc, char *argv[])
     math::RandomSeed((size_t) CLI::GetParam<int>("seed"));
   else
     math::RandomSeed((size_t) std::time(NULL));
- // A user cannot specify both reference data and a model.
-  if (CLI::HasParam("reference") && CLI::HasParam("input_model_file"))
+  // A user cannot specify both reference data and a model.
+  if (CLI::HasParam("reference") && CLI::HasParam("input_model"))
     Log::Fatal << "Only one of --reference_file (-r) or --input_model_file (-m)"
         << " may be specified!" << endl;
 
   // A user must specify one of them...
-  if (!CLI::HasParam("reference") && !CLI::HasParam("input_model_file"))
+  if (!CLI::HasParam("reference") && !CLI::HasParam("input_model"))
     Log::Fatal << "No model specified (--input_model_file) and no reference "
         << "data specified (--reference_file)!  One must be provided." << endl;
 
-  if (CLI::HasParam("input_model_file"))
+  if (CLI::HasParam("input_model"))
   {
     // Notify the user of parameters that will be ignored.
     if (CLI::HasParam("tree_type"))
@@ -130,7 +130,7 @@ int main(int argc, char *argv[])
   }
 
   // The user should give something to do...
-  if (!CLI::HasParam("k") && !CLI::HasParam("output_model_file"))
+  if (!CLI::HasParam("k") && !CLI::HasParam("output_model"))
     Log::Warn << "Neither -k nor --output_model_file are specified, so no "
         << "results from this program will be saved!" << endl;
 
@@ -207,12 +207,12 @@ int main(int argc, char *argv[])
   else
   {
     // Load the model from file.
-    const string inputModelFile = CLI::GetParam<string>("input_model_file");
-    data::Load(inputModelFile, "rann_model", rann, true); // Fatal on failure.
+    rann = std::move(CLI::GetParam<RANNModel>("input_model"));
 
-    Log::Info << "Loaded rank-approximate kNN model from '" << inputModelFile
-        << "' (trained on " << rann.Dataset().n_rows << "x"
-        << rann.Dataset().n_cols << " dataset)." << endl;
+    Log::Info << "Loaded rank-approximate kNN model from '"
+        << CLI::GetUnmappedParam<RANNModel>("input_model") << "' (trained on "
+        << rann.Dataset().n_rows << "x" << rann.Dataset().n_cols << " dataset)."
+        << endl;
 
     // Adjust singleMode and naive if necessary.
     rann.SingleMode() = CLI::HasParam("single_mode");
@@ -275,9 +275,8 @@ int main(int argc, char *argv[])
       CLI::GetParam<arma::mat>("distances") = std::move(distances);
   }
 
-  if (CLI::HasParam("output_model_file"))
-  {
-    const string outputModelFile = CLI::GetParam<string>("output_model_file");
-    data::Save(outputModelFile, "rann_model", rann);
-  }
+  if (CLI::HasParam("output_model"))
+    CLI::GetParam<RANNModel>("output_model") = std::move(rann);
+
+  CLI::Destroy();
 }

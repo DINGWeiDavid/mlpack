@@ -15,7 +15,7 @@
 // In case it hasn't been included yet.
 #include "load_arff.hpp"
 
-#include <boost/algorithm/string.hpp>
+#include <boost/algorithm/string/trim.hpp>
 
 namespace mlpack {
 namespace data {
@@ -49,20 +49,22 @@ void LoadARFF(const std::string& filename,
     if (line[0] == '@')
     {
       typedef boost::tokenizer<boost::escaped_list_separator<char>> Tokenizer;
-      std::string separators = " \t\%"; // Split on comments too.
-      boost::escaped_list_separator<char> sep("\\", separators, "\"{");
+      std::string separators = " \t%"; // Split on comments too.
+      boost::escaped_list_separator<char> sep("\\", separators, "{\"");
       Tokenizer tok(line, sep);
       Tokenizer::iterator it = tok.begin();
 
       // Get the annotation we are looking at.
       std::string annotation(*it);
+      std::transform(annotation.begin(), annotation.end(), annotation.begin(),
+            ::tolower);
 
-      if (*tok.begin() == "@relation")
+      if (annotation == "@relation")
       {
         // We don't actually have anything to do with the name of the dataset.
         continue;
       }
-      else if (*tok.begin() == "@attribute")
+      else if (annotation == "@attribute")
       {
         ++dimensionality;
         // We need to mark this dimension with its according type.
@@ -84,7 +86,7 @@ void LoadARFF(const std::string& filename,
           throw std::logic_error("list of ARFF values not yet supported");
         }
       }
-      else if (*tok.begin() == "@data")
+      else if (annotation == "@data")
       {
         // We are in the data section.  So we can move out of this loop.
         break;
@@ -177,7 +179,11 @@ void LoadARFF(const std::string& filename,
       // What should this token be?
       if (info.Type(col) == Datatype::categorical)
       {
-        matrix(col, row) = info.MapString(*it, col); // We load transposed.
+        // Strip spaces before mapping.
+        std::string token = *it;
+        boost::trim(token);
+        // We load transposed.
+        matrix(col, row) = info.template MapString<eT>(token, col);
       }
       else if (info.Type(col) == Datatype::numeric)
       {

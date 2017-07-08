@@ -10,7 +10,7 @@
  * http://www.opensource.org/licenses/BSD-3-Clause for more information.
  */
 #include <mlpack/prereqs.hpp>
-#include <mlpack/core/util/param.hpp>
+#include <mlpack/core/util/cli.hpp>
 #include "logistic_regression.hpp"
 
 #include <mlpack/core/optimizers/sgd/sgd.hpp>
@@ -77,7 +77,7 @@ PROGRAM_INFO("L2-regularized Logistic Regression and Prediction",
 // Training parameters.
 PARAM_MATRIX_IN("training", "A matrix containing the training set (the matrix "
     "of predictors, X).", "t");
-PARAM_UMATRIX_IN("labels", "A matrix containing labels (0 or 1) for the points "
+PARAM_UROW_IN("labels", "A matrix containing labels (0 or 1) for the points "
     "in the training set (y).", "l");
 
 // Optimizer parameters.
@@ -94,14 +94,14 @@ PARAM_DOUBLE_IN("step_size", "Step size for SGD and mini-batch SGD optimizers.",
 PARAM_INT_IN("batch_size", "Batch size for mini-batch SGD.", "b", 50);
 
 // Model loading/saving.
-PARAM_STRING_IN("input_model_file", "File containing existing model "
-    "(parameters).", "m", "");
-PARAM_STRING_OUT("output_model_file", "File to save trained logistic regression"
-    " model to.", "M");
+PARAM_MODEL_IN(LogisticRegression<>, "input_model", "Existing model "
+    "(parameters).", "m");
+PARAM_MODEL_OUT(LogisticRegression<>, "output_model", "Output for trained "
+    "logistic regression model.", "M");
 
 // Testing.
 PARAM_MATRIX_IN("test", "Matrix containing test dataset.", "T");
-PARAM_UMATRIX_OUT("output", "If --test_file is specified, this matrix is where "
+PARAM_UROW_OUT("output", "If --test_file is specified, this matrix is where "
     "the predictions for the test set will be saved.", "o");
 PARAM_MATRIX_OUT("output_probabilities", "If --test_file is specified, this "
     "matrix is where the class probabilities for the test set will be saved.",
@@ -121,18 +121,16 @@ int main(int argc, char** argv)
   const double stepSize = CLI::GetParam<double>("step_size");
   const size_t batchSize = (size_t) CLI::GetParam<int>("batch_size");
   const size_t maxIterations = (size_t) CLI::GetParam<int>("max_iterations");
-  const string inputModelFile = CLI::GetParam<string>("input_model_file");
-  const string outputModelFile = CLI::GetParam<string>("output_model_file");
   const double decisionBoundary = CLI::GetParam<double>("decision_boundary");
 
   // One of inputFile and modelFile must be specified.
-  if (!CLI::HasParam("training") && !CLI::HasParam("input_model_file"))
+  if (!CLI::HasParam("training") && !CLI::HasParam("input_model"))
     Log::Fatal << "One of --input_model_file or --training_file must be "
         << "specified." << endl;
 
   // If no output file is given, the user should know that the model will not be
   // saved, but only if a model is being trained.
-  if (!CLI::HasParam("output_model_file") && !CLI::HasParam("training"))
+  if (!CLI::HasParam("output_model") && CLI::HasParam("training"))
     Log::Warn << "--output_model_file not given; trained model will not be "
         << "saved." << endl;
 
@@ -186,7 +184,6 @@ int main(int argc, char** argv)
 
   // These are the matrices we might use.
   arma::mat regressors;
-  arma::Mat<size_t> responsesMat;
   arma::Row<size_t> responses;
   arma::mat testSet;
   arma::Row<size_t> predictions;
@@ -197,8 +194,8 @@ int main(int argc, char** argv)
 
   // Load the model, if necessary.
   LogisticRegression<> model(0, 0); // Empty model.
-  if (CLI::HasParam("input_model_file"))
-    data::Load(inputModelFile, "logistic_regression_model", model);
+  if (CLI::HasParam("input_model"))
+    model = std::move(CLI::GetParam<LogisticRegression<>>("input_model"));
   else
   {
     // Set the size of the parameters vector, if necessary.
@@ -211,12 +208,7 @@ int main(int argc, char** argv)
   // Check if the responses are in a separate file.
   if (CLI::HasParam("training") && CLI::HasParam("labels"))
   {
-    responsesMat = std::move(CLI::GetParam<arma::Mat<size_t>>("labels"));
-    if (responsesMat.n_cols == 1)
-      responses = responsesMat.col(0).t();
-    else
-      responses = responsesMat.row(0);
-
+    responses = std::move(CLI::GetParam<arma::Row<size_t>>("labels"));
     if (responses.n_cols != regressors.n_cols)
       Log::Fatal << "The labels (--labels_file) must have the same number of "
           << "points as the training dataset (--training_file)." << endl;
@@ -237,31 +229,30 @@ int main(int argc, char** argv)
   // Now, do the training.
   if (CLI::HasParam("training"))
   {
-    LogisticRegressionFunction<> lrf(regressors, responses, model.Parameters());
     if (optimizerType == "sgd")
     {
-      SGD<LogisticRegressionFunction<>> sgdOpt(lrf);
+      SGD<> sgdOpt;
       sgdOpt.MaxIterations() = maxIterations;
       sgdOpt.Tolerance() = tolerance;
       sgdOpt.StepSize() = stepSize;
       Log::Info << "Training model with SGD optimizer." << endl;
 
       // This will train the model.
-      model.Train(sgdOpt);
+      model.Train(regressors, responses, sgdOpt);
     }
     else if (optimizerType == "lbfgs")
     {
-      L_BFGS<LogisticRegressionFunction<>> lbfgsOpt(lrf);
+      L_BFGS lbfgsOpt;
       lbfgsOpt.MaxIterations() = maxIterations;
       lbfgsOpt.MinGradientNorm() = tolerance;
       Log::Info << "Training model with L-BFGS optimizer." << endl;
 
       // This will train the model.
-      model.Train(lbfgsOpt);
+      model.Train(regressors, responses, lbfgsOpt);
     }
     else if (optimizerType == "minibatch-sgd")
     {
-      MiniBatchSGD<LogisticRegressionFunction<>> mbsgdOpt(lrf);
+      MiniBatchSGD mbsgdOpt;
       mbsgdOpt.BatchSize() = batchSize;
       mbsgdOpt.Tolerance() = tolerance;
       mbsgdOpt.StepSize() = stepSize;
@@ -269,7 +260,7 @@ int main(int argc, char** argv)
       Log::Info << "Training model with mini-batch SGD optimizer (batch size "
           << batchSize << ")." << endl;
 
-      model.Train(mbsgdOpt);
+      model.Train(regressors, responses, mbsgdOpt);
     }
   }
 
@@ -285,7 +276,7 @@ int main(int argc, char** argv)
           << CLI::GetUnmappedParam<arma::mat>("test") << "'." << endl;
       model.Classify(testSet, predictions, decisionBoundary);
 
-      CLI::GetParam<arma::Mat<size_t>>("output") = std::move(predictions);
+      CLI::GetParam<arma::Row<size_t>>("output") = std::move(predictions);
     }
 
     if (CLI::HasParam("output_probabilities"))
@@ -300,9 +291,13 @@ int main(int argc, char** argv)
     }
   }
 
-  if (!outputModelFile.empty())
+  if (CLI::HasParam("output_model"))
   {
-    Log::Info << "Saving model to '" << outputModelFile << "'." << endl;
-    data::Save(outputModelFile, "logistic_regression_model", model, false);
+    Log::Info << "Saving model to '"
+        << CLI::GetUnmappedParam<LogisticRegression<>>("output_model") << "'."
+        << endl;
+    CLI::GetParam<LogisticRegression<>>("output_model") = std::move(model);
   }
+
+  CLI::Destroy();
 }

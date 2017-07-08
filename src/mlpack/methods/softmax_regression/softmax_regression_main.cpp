@@ -9,12 +9,16 @@
  * http://www.opensource.org/licenses/BSD-3-Clause for more information.
  */
 #include <mlpack/prereqs.hpp>
-#include <mlpack/core/util/param.hpp>
+#include <mlpack/core/util/cli.hpp>
 #include <mlpack/methods/softmax_regression/softmax_regression.hpp>
 #include <mlpack/core/optimizers/lbfgs/lbfgs.hpp>
 
 #include <memory>
 #include <set>
+
+using namespace std;
+using namespace mlpack;
+using namespace mlpack::regression;
 
 // Define parameters for the executable.
 PROGRAM_INFO("Softmax Regression", "This program performs softmax regression, "
@@ -32,11 +36,11 @@ PROGRAM_INFO("Softmax Regression", "This program performs softmax regression, "
     "(-r), and if an intercept term is not desired in the model, the "
     "--no_intercept (-N) can be specified."
     "\n\n"
-    "The trained model can be saved to a file with the --output_model_file (-m) "
-    "option.  If training is not desired, but only testing is, a model can be "
-    "loaded with the --input_model_file (-i) option.  At the current time, a loaded "
-    "model cannot be trained further, so specifying both -i and -t is not "
-    "allowed."
+    "The trained model can be saved to a file with the --output_model_file (-m)"
+    " option.  If training is not desired, but only testing is, a model can be "
+    "loaded with the --input_model_file (-i) option.  At the current time, a "
+    "loaded model cannot be trained further, so specifying both -i and -t is "
+    "not allowed."
     "\n\n"
     "The program is also able to evaluate a model on test data.  A test dataset"
     " can be specified with the --test_data (-T) option.  Class predictions "
@@ -48,20 +52,20 @@ PROGRAM_INFO("Softmax Regression", "This program performs softmax regression, "
 // Required options.
 PARAM_MATRIX_IN("training", "A matrix containing the training set (the matrix "
     "of predictors, X).", "t");
-PARAM_UMATRIX_IN("labels", "A matrix containing labels (0 or 1) for the points "
+PARAM_UROW_IN("labels", "A matrix containing labels (0 or 1) for the points "
     "in the training set (y). The labels must order as a row.", "l");
 
 // Model loading/saving.
-PARAM_STRING_IN("input_model_file", "File containing existing model "
-    "(parameters).", "m", "");
-PARAM_STRING_OUT("output_model_file", "File to save trained softmax regression "
-    "model to.", "M");
+PARAM_MODEL_IN(SoftmaxRegression, "input_model", "File containing existing "
+    "model (parameters).", "m");
+PARAM_MODEL_OUT(SoftmaxRegression, "output_model", "File to save trained "
+    "softmax regression model to.", "M");
 
 // Testing.
 PARAM_MATRIX_IN("test", "Matrix containing test dataset.", "T");
-PARAM_UMATRIX_OUT("predictions", "Matrix to save predictions for test dataset "
+PARAM_UROW_OUT("predictions", "Matrix to save predictions for test dataset "
     "into.", "p");
-PARAM_UMATRIX_IN("test_labels", "Matrix containing test labels.", "L");
+PARAM_UROW_IN("test_labels", "Matrix containing test labels.", "L");
 
 // Softmax configuration options.
 PARAM_INT_IN("max_iterations", "Maximum number of iterations before "
@@ -75,33 +79,26 @@ PARAM_DOUBLE_IN("lambda", "L2-regularization constant", "r", 0.0001);
 
 PARAM_FLAG("no_intercept", "Do not add the intercept term to the model.", "N");
 
-using namespace std;
-
 // Count the number of classes in the given labels (if numClasses == 0).
 size_t CalculateNumberOfClasses(const size_t numClasses,
                                 const arma::Row<size_t>& trainLabels);
 
 // Test the accuracy of the model.
 template<typename Model>
-void TestPredictAcc(const size_t numClasses, const Model& model);
+void TestClassifyAcc(const size_t numClasses, const Model& model);
 
 // Build the softmax model given the parameters.
 template<typename Model>
-unique_ptr<Model> TrainSoftmax(const string& inputModelFile,
-                               const size_t maxIterations);
+unique_ptr<Model> TrainSoftmax(const size_t maxIterations);
 
 int main(int argc, char** argv)
 {
-  using namespace mlpack;
-
   CLI::ParseCommandLine(argc, argv);
 
-  const string inputModelFile = CLI::GetParam<string>("input_model_file");
-  const string outputModelFile = CLI::GetParam<string>("output_model_file");
   const int maxIterations = CLI::GetParam<int>("max_iterations");
 
   // One of inputFile and modelFile must be specified.
-  if (!CLI::HasParam("input_model_file") && !CLI::HasParam("training"))
+  if (!CLI::HasParam("input_model") && !CLI::HasParam("training"))
     Log::Fatal << "One of --input_model_file or --training_file must be "
         << "specified." << endl;
 
@@ -115,19 +112,19 @@ int main(int argc, char** argv)
         << ")! Must be greater than or equal to 0." << endl;
 
   // Make sure we have an output file of some sort.
-  if (!CLI::HasParam("output_model_file") &&
-      !CLI::HasParam("predictions"))
+  if (!CLI::HasParam("output_model") && !CLI::HasParam("predictions"))
     Log::Warn << "Neither --output_model_file nor --predictions_file are set; "
         << "no results from this program will be saved." << endl;
 
-  using SM = regression::SoftmaxRegression<>;
-  unique_ptr<SM> sm = TrainSoftmax<SM>(inputModelFile, maxIterations);
+  using SM = SoftmaxRegression;
+  unique_ptr<SM> sm = TrainSoftmax<SM>(maxIterations);
 
-  TestPredictAcc(sm->NumClasses(), *sm);
+  TestClassifyAcc(sm->NumClasses(), *sm);
 
-  if (CLI::HasParam("output_model_file"))
-    data::Save(CLI::GetParam<string>("output_model_file"),
-        "softmax_regression_model", *sm, true);
+  if (CLI::HasParam("output_model"))
+    CLI::GetParam<SM>("output_model") = std::move(*sm);
+
+  CLI::Destroy();
 }
 
 size_t CalculateNumberOfClasses(const size_t numClasses,
@@ -146,7 +143,7 @@ size_t CalculateNumberOfClasses(const size_t numClasses,
 }
 
 template<typename Model>
-void TestPredictAcc(size_t numClasses, const Model& model)
+void TestClassifyAcc(size_t numClasses, const Model& model)
 {
   using namespace mlpack;
 
@@ -173,18 +170,17 @@ void TestPredictAcc(size_t numClasses, const Model& model)
   arma::mat testData = std::move(CLI::GetParam<arma::mat>("test"));
 
   arma::Row<size_t> predictLabels;
-  model.Predict(testData, predictLabels);
+  model.Classify(testData, predictLabels);
 
   // Save predictions, if desired.
   if (CLI::HasParam("predictions"))
-    CLI::GetParam<arma::Mat<size_t>>("predictions") = std::move(predictLabels);
+    CLI::GetParam<arma::Row<size_t>>("predictions") = std::move(predictLabels);
 
   // Calculate accuracy, if desired.
   if (CLI::HasParam("test_labels"))
   {
-    arma::Mat<size_t> tmpTestLabels =
-        CLI::GetParam<arma::Mat<size_t>>("test_labels");
-    arma::Row<size_t> testLabels = tmpTestLabels.row(0);
+    arma::Row<size_t> testLabels =
+      std::move(CLI::GetParam<arma::Row<size_t>>("test_labels"));
 
     if (testData.n_cols != testLabels.n_elem)
     {
@@ -220,25 +216,23 @@ void TestPredictAcc(size_t numClasses, const Model& model)
 }
 
 template<typename Model>
-unique_ptr<Model> TrainSoftmax(const std::string& inputModelFile,
-                               const size_t maxIterations)
+unique_ptr<Model> TrainSoftmax(const size_t maxIterations)
 {
   using namespace mlpack;
 
   using SRF = regression::SoftmaxRegressionFunction;
 
   unique_ptr<Model> sm;
-  if (!inputModelFile.empty())
+  if (CLI::HasParam("input_model"))
   {
     sm.reset(new Model(0, 0, false));
-    mlpack::data::Load(inputModelFile, "softmax_regression_model", *sm, true);
+    *sm = std::move(CLI::GetParam<Model>("input_model"));
   }
   else
   {
     arma::mat trainData = std::move(CLI::GetParam<arma::mat>("training"));
-    arma::Mat<size_t> tmpTrainLabels =
-        std::move(CLI::GetParam<arma::Mat<size_t>>("labels"));
-    arma::Row<size_t> trainLabels = tmpTrainLabels.row(0);
+    arma::Row<size_t> trainLabels =
+        std::move(CLI::GetParam<arma::Row<size_t>>("labels"));
 
     if (trainData.n_cols != trainLabels.n_elem)
       Log::Fatal << "Samples of input_data should same as the size of "
@@ -249,12 +243,10 @@ unique_ptr<Model> TrainSoftmax(const std::string& inputModelFile,
 
     const bool intercept = CLI::HasParam("no_intercept") ? false : true;
 
-    SRF smFunction(trainData, trainLabels, numClasses, intercept,
-        CLI::GetParam<double>("lambda"));
-
     const size_t numBasis = 5;
-    optimization::L_BFGS<SRF> optimizer(smFunction, numBasis, maxIterations);
-    sm.reset(new Model(optimizer));
+    optimization::L_BFGS optimizer(numBasis, maxIterations);
+    sm.reset(new Model(trainData, trainLabels, numClasses,
+        CLI::GetParam<double>("lambda"), intercept, std::move(optimizer)));
   }
 
   return sm;

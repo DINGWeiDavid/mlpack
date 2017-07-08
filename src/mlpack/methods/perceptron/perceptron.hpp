@@ -78,7 +78,7 @@ class Perceptron
    * @param D Weight vector to use while training. For boosting purposes.
    * @param labels The labels of data.
    */
-  Perceptron(const Perceptron<>& other,
+  Perceptron(const Perceptron& other,
              const MatType& data,
              const arma::Row<size_t>& labels,
              const arma::rowvec& instanceWeights);
@@ -136,7 +136,7 @@ class Perceptron
   //! Modify the biases.  You had better know what you are doing!
   arma::vec& Biases() { return biases; }
 
-private:
+ private:
   //! The maximum number of iterations during training.
   size_t maxIterations;
 

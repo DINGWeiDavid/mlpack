@@ -12,9 +12,8 @@
  * 3-clause BSD license along with mlpack.  If not, see
  * http://www.opensource.org/licenses/BSD-3-Clause for more information.
  */
-
 #include <mlpack/prereqs.hpp>
-#include <mlpack/core/util/param.hpp>
+#include <mlpack/core/util/cli.hpp>
 #include <mlpack/core/data/normalize_labels.hpp>
 #include "perceptron.hpp"
 
@@ -64,26 +63,7 @@ PROGRAM_INFO("Perceptron",
     "data must match.  So you cannot pass a perceptron model trained on 2 "
     "classes and then re-train with a 4-class dataset.  Similarly, attempting "
     "classification on a 3-dimensional dataset with a perceptron that has been "
-    "trained on 8 dimensions will cause an error."
-    );
-
-// Training parameters.
-PARAM_MATRIX_IN("training", "A matrix containing the training set.", "t");
-PARAM_UMATRIX_IN("labels", "A matrix containing labels for the training set.",
-    "l");
-PARAM_INT_IN("max_iterations","The maximum number of iterations the perceptron "
-    "is to be run", "n", 1000);
-
-// Model loading/saving.
-PARAM_STRING_IN("input_model_file", "File containing input perceptron model.",
-    "m", "");
-PARAM_STRING_OUT("output_model_file", "File to save trained perceptron model "
-    "to.", "M");
-
-// Testing/classification parameters.
-PARAM_MATRIX_IN("test", "A matrix containing the test set.", "T");
-PARAM_UMATRIX_OUT("output", "The matrix in which the predicted labels for the"
-    " test set will be written.", "o");
+    "trained on 8 dimensions will cause an error.");
 
 // When we save a model, we must also save the class mappings.  So we use this
 // auxiliary structure to store both the perceptron and the mapping, and we'll
@@ -91,11 +71,15 @@ PARAM_UMATRIX_OUT("output", "The matrix in which the predicted labels for the"
 class PerceptronModel
 {
  private:
-  Perceptron<>& p;
-  Col<size_t>& map;
+  Perceptron<> p;
+  Col<size_t> map;
 
  public:
-  PerceptronModel(Perceptron<>& p, Col<size_t>& map) : p(p), map(map) { }
+  Perceptron<>& P() { return p; }
+  const Perceptron<>& P() const { return p; }
+
+  Col<size_t>& Map() { return map; }
+  const Col<size_t>& Map() const { return map; }
 
   template<typename Archive>
   void Serialize(Archive& ar, const unsigned int /* version */)
@@ -105,24 +89,39 @@ class PerceptronModel
   }
 };
 
+// Training parameters.
+PARAM_MATRIX_IN("training", "A matrix containing the training set.", "t");
+PARAM_UROW_IN("labels", "A matrix containing labels for the training set.",
+    "l");
+PARAM_INT_IN("max_iterations", "The maximum number of iterations the "
+    "perceptron is to be run", "n", 1000);
+
+// Model loading/saving.
+PARAM_MODEL_IN(PerceptronModel, "input_model", "Input perceptron model.", "m");
+PARAM_MODEL_OUT(PerceptronModel, "output_model", "Output for trained perceptron"
+    " model.", "M");
+
+// Testing/classification parameters.
+PARAM_MATRIX_IN("test", "A matrix containing the test set.", "T");
+PARAM_UROW_OUT("output", "The matrix in which the predicted labels for the"
+    " test set will be written.", "o");
+
 int main(int argc, char** argv)
 {
   CLI::ParseCommandLine(argc, argv);
 
   // First, get all parameters and validate them.
-  const string inputModelFile = CLI::GetParam<string>("input_model_file");
-  const string outputModelFile = CLI::GetParam<string>("output_model_file");
   const size_t maxIterations = (size_t) CLI::GetParam<int>("max_iterations");
 
   // We must either load a model or train a model.
-  if (!CLI::HasParam("input_model_file") && !CLI::HasParam("training"))
+  if (!CLI::HasParam("input_model") && !CLI::HasParam("training"))
     Log::Fatal << "Either an input model must be specified with "
         << "--input_model_file or training data must be given "
         << "(--training_file)!" << endl;
 
   // If the user isn't going to save the output model or any predictions, we
   // should issue a warning.
-  if (!CLI::HasParam("output_model_file") && !CLI::HasParam("test"))
+  if (!CLI::HasParam("output_model") && !CLI::HasParam("test"))
     Log::Warn << "Output will not be saved!  (Neither --test_file nor "
         << "--output_model_file are specified.)" << endl;
 
@@ -135,18 +134,14 @@ int main(int argc, char** argv)
         << "--test_file will not be saved." << endl;
 
   // Now, load our model, if there is one.
-  Perceptron<>* p = NULL;
-  Col<size_t> mappings;
-  if (CLI::HasParam("input_model_file"))
+  PerceptronModel p;
+  if (CLI::HasParam("input_model"))
   {
-    Log::Info << "Loading saved perceptron from model file '" << inputModelFile
-        << "'." << endl;
+    Log::Info << "Loading saved perceptron from model file '"
+        << CLI::GetUnmappedParam<PerceptronModel>("input_model") << "'."
+        << endl;
 
-    // The parameters here are invalid, but we are about to load the model
-    // anyway...
-    p = new Perceptron<>(0, 0);
-    PerceptronModel pm(*p, mappings); // Also load class mappings.
-    data::Load(inputModelFile, "perceptron_model", pm, true);
+    p = std::move(CLI::GetParam<PerceptronModel>("input_model"));
   }
 
   // Next, load the training data and labels (if they have been given).
@@ -156,7 +151,7 @@ int main(int argc, char** argv)
         << CLI::GetUnmappedParam<mat>("training");
     if (CLI::HasParam("labels"))
       Log::Info << "' with labels in '"
-          << CLI::GetUnmappedParam<Mat<size_t>>("labels") << "'";
+          << CLI::GetUnmappedParam<Row<size_t>>("labels") << "'";
     else
       Log::Info << "'";
     Log::Info << " for a maximum of " << maxIterations << " iterations."
@@ -165,64 +160,63 @@ int main(int argc, char** argv)
     mat trainingData = std::move(CLI::GetParam<mat>("training"));
 
     // Load labels.
-    Mat<size_t> labelsIn;
+    Row<size_t> labelsIn;
 
     // Did the user pass in labels?
     if (CLI::HasParam("labels"))
     {
-      labelsIn = std::move(CLI::GetParam<arma::Mat<size_t>>("labels"));
+      labelsIn = std::move(CLI::GetParam<Row<size_t>>("labels"));
     }
     else
     {
       // Use the last row of the training data as the labels.
       Log::Info << "Using the last dimension of training set as labels."
           << endl;
-      labelsIn = arma::conv_to<arma::Mat<size_t>>::from(
-          trainingData.row(trainingData.n_rows - 1).t());
+      labelsIn = arma::conv_to<Row<size_t>>::from(
+          trainingData.row(trainingData.n_rows - 1));
       trainingData.shed_row(trainingData.n_rows - 1);
     }
 
-    // Do the labels need to be transposed?
-    if (labelsIn.n_cols == 1)
-      labelsIn = labelsIn.t();
-
     // Normalize the labels.
     Row<size_t> labels;
-    data::NormalizeLabels(labelsIn.row(0), labels, mappings);
+    data::NormalizeLabels(labelsIn, labels, p.Map());
 
     // Now, if we haven't already created a perceptron, do it.  Otherwise, make
     // sure the dimensions are right, then continue training.
-    if (p == NULL)
+    if (!CLI::HasParam("input_model"))
     {
       // Create and train the classifier.
       Timer::Start("training");
-      p = new Perceptron<>(trainingData, labels, max(labels) + 1,
+      p.P() = Perceptron<>(trainingData, labels, max(labels) + 1,
           maxIterations);
       Timer::Stop("training");
     }
     else
     {
       // Check dimensionality.
-      if (p->Weights().n_rows != trainingData.n_rows)
+      if (p.P().Weights().n_rows != trainingData.n_rows)
       {
-        Log::Fatal << "Perceptron from '" << inputModelFile << "' is built on "
-            << "data with " << p->Weights().n_rows << " dimensions, but data in"
-            << " '" << CLI::GetUnmappedParam<arma::mat>("training") << "' has "
+        Log::Fatal << "Perceptron from '"
+            << CLI::GetUnmappedParam<PerceptronModel>("input_model")
+            << "' is built on data with " << p.P().Weights().n_rows
+            << " dimensions, but data in '"
+            << CLI::GetUnmappedParam<arma::mat>("training") << "' has "
             << trainingData.n_rows << "dimensions!" << endl;
       }
 
       // Check the number of labels.
-      if (max(labels) + 1 > p->Weights().n_cols)
+      if (max(labels) + 1 > p.P().Weights().n_cols)
       {
-        Log::Fatal << "Perceptron from '" << inputModelFile << "' has "
-            << p->Weights().n_cols << " classes, but the training data has "
+        Log::Fatal << "Perceptron from '"
+            << CLI::GetUnmappedParam<PerceptronModel>("input_model") << "' has "
+            << p.P().Weights().n_cols << " classes, but the training data has "
             << max(labels) + 1 << " classes!" << endl;
       }
 
       // Now train.
       Timer::Start("training");
-      p->MaxIterations() = maxIterations;
-      p->Train(trainingData, labels.t());
+      p.P().MaxIterations() = maxIterations;
+      p.P().Train(trainingData, labels.t());
       Timer::Stop("training");
     }
   }
@@ -234,35 +228,31 @@ int main(int argc, char** argv)
         << CLI::GetUnmappedParam<arma::mat>("test") << "'." << endl;
     mat testData = std::move(CLI::GetParam<arma::mat>("test"));
 
-    if (testData.n_rows != p->Weights().n_rows)
+    if (testData.n_rows != p.P().Weights().n_rows)
     {
       Log::Fatal << "Test data dimensionality (" << testData.n_rows << ") must "
           << "be the same as the dimensionality of the perceptron ("
-          << p->Weights().n_rows << ")!" << endl;
+          << p.P().Weights().n_rows << ")!" << endl;
     }
 
     // Time the running of the perceptron classifier.
     Row<size_t> predictedLabels(testData.n_cols);
     Timer::Start("testing");
-    p->Classify(testData, predictedLabels);
+    p.P().Classify(testData, predictedLabels);
     Timer::Stop("testing");
 
     // Un-normalize labels to prepare output.
     Row<size_t> results;
-    data::RevertLabels(predictedLabels, mappings, results);
+    data::RevertLabels(predictedLabels, p.Map(), results);
 
     // Save the predicted labels.
     if (CLI::HasParam("output"))
-      CLI::GetParam<arma::Mat<size_t>>("output") = std::move(results);
+      CLI::GetParam<arma::Row<size_t>>("output") = std::move(results);
   }
 
   // Lastly, do we need to save the output model?
-  if (CLI::HasParam("output_model_file"))
-  {
-    PerceptronModel pm(*p, mappings);
-    data::Save(outputModelFile, "perceptron_model", pm);
-  }
+  if (CLI::HasParam("output_model"))
+    CLI::GetParam<PerceptronModel>("output_model") = std::move(p);
 
-  // Clean up memory.
-  delete p;
+  CLI::Destroy();
 }

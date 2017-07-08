@@ -11,7 +11,8 @@
  * http://www.opensource.org/licenses/BSD-3-Clause for more information.
  */
 #include <mlpack/prereqs.hpp>
-#include <mlpack/core/util/param.hpp>
+#include <mlpack/core/data/load_impl.hpp>
+#include <mlpack/core/util/cli.hpp>
 #include <mlpack/core/data/imputer.hpp>
 #include <mlpack/core/data/dataset_mapper.hpp>
 #include <mlpack/core/data/map_policies/increment_policy.hpp>
@@ -154,7 +155,8 @@ int main(int argc, char** argv)
     else if (strategy == "custom")
     {
       CustomImputation<double> strat(customValue);
-      Imputer<double, MapperType, CustomImputation<double>> imputer(info, strat);
+      Imputer<double, MapperType, CustomImputation<double>> imputer(
+          info, strat);
     }
     else
     {

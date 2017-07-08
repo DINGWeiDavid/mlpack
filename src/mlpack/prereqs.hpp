@@ -30,10 +30,9 @@
 #include <climits>
 #include <cfloat>
 #include <cstdint>
-#include <iostream>
 #include <stdexcept>
 #include <tuple>
-#include <queue>
+#include <utility>
 
 // But if it's not defined, we'll do it.
 #ifndef M_PI
@@ -62,6 +61,12 @@ using enable_if_t = typename enable_if<B, T>::type;
 #endif
 #endif
 
+// Increase the number of template arguments for the boost list class.
+#undef BOOST_MPL_CFG_NO_PREPROCESSED_HEADERS
+#undef BOOST_MPL_LIMIT_LIST_SIZE
+#define BOOST_MPL_CFG_NO_PREPROCESSED_HEADERS
+#define BOOST_MPL_LIMIT_LIST_SIZE 40
+
 // We'll need the necessary boost::serialization features, as well as what we
 // use with mlpack.  In Boost 1.59 and newer, the BOOST_PFTO code is no longer
 // defined, but we still need to define it (as nothing) so that the mlpack
@@ -88,7 +93,7 @@ using enable_if_t = typename enable_if<B, T>::type;
 // defines.
 #include <mlpack/core/util/arma_config_check.hpp>
 
-// All code should have access to logging
+// All code should have access to logging.
 #include <mlpack/core/util/log.hpp>
 #include <mlpack/core/util/timers.hpp>
 
@@ -99,5 +104,15 @@ using enable_if_t = typename enable_if<B, T>::type;
   #pragma warning(disable : 4519)
   #define ARMA_USE_CXX11
 #endif
+// This can be removed with Visual Studio supports an OpenMP version with
+// unsigned loop variables.
+#ifdef _WIN32
+  #define omp_size_t intmax_t
+#else
+  #define omp_size_t size_t
+#endif
+
+// We need to be able to mark functions deprecated.
+#include <mlpack/core/util/deprecated.hpp>
 
 #endif

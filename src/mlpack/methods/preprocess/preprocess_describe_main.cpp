@@ -10,7 +10,7 @@
  * http://www.opensource.org/licenses/BSD-3-Clause for more information.
  */
 #include <mlpack/prereqs.hpp>
-#include <mlpack/core/util/param.hpp>
+#include <mlpack/core/util/cli.hpp>
 #include <boost/format.hpp>
 #include <boost/lexical_cast.hpp>
 
@@ -144,7 +144,7 @@ double Kurtosis(const arma::rowvec& input,
  */
 double StandardError(const size_t size, const double& fStd)
 {
-   return fStd / sqrt(size);
+  return fStd / sqrt(size);
 }
 
 int main(int argc, char** argv)

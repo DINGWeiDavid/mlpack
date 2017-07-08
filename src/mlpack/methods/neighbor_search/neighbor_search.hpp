@@ -26,9 +26,9 @@
 #include "neighbor_search_rules.hpp"
 
 namespace mlpack {
-namespace neighbor /** Neighbor-search routines.  These include
-                    * all-nearest-neighbors and all-furthest-neighbors
-                    * searches. */ {
+// Neighbor-search routines. These include all-nearest-neighbors and
+// all-furthest-neighbors searches.
+namespace neighbor  {
 
 // Forward declaration.
 template<typename SortPolicy>
@@ -201,6 +201,36 @@ class NeighborSearch
   NeighborSearch(const NeighborSearchMode mode = DUAL_TREE_MODE,
                  const double epsilon = 0,
                  const MetricType metric = MetricType());
+
+  /**
+   * Construct the NeighborSearch object by copying the given NeighborSearch
+   * object.
+   *
+   * @param other NeighborSearch object to copy.
+   */
+  NeighborSearch(const NeighborSearch& other);
+
+  /**
+   * Construct the NeighborSearch object by taking ownership of the given
+   * NeighborSearch object.
+   *
+   * @param other NeighborSearch object to take ownership of.
+   */
+  NeighborSearch(NeighborSearch&& other);
+
+  /**
+   * Copy the given NeighborSearch object.
+   *
+   * @param other NeighborSearch object to copy.
+   */
+  NeighborSearch& operator=(const NeighborSearch& other);
+
+  /**
+   * Take ownership of the given NeighborSearch object.
+   *
+   * @param other NeighborSearch object to take ownership of.
+   */
+  NeighborSearch& operator=(NeighborSearch&& other);
 
   /**
    * Delete the NeighborSearch object. The tree is the only member we are

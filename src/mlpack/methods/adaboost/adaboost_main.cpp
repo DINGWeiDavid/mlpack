@@ -31,11 +31,11 @@
  * 3-clause BSD license along with mlpack.  If not, see
  * http://www.opensource.org/licenses/BSD-3-Clause for more information.
  */
-
 #include <mlpack/prereqs.hpp>
-#include <mlpack/core/util/param.hpp>
+#include <mlpack/core/util/cli.hpp>
 #include <mlpack/core/data/normalize_labels.hpp>
 #include "adaboost.hpp"
+#include "adaboost_model.hpp"
 
 using namespace mlpack;
 using namespace std;
@@ -72,17 +72,11 @@ PROGRAM_INFO("AdaBoost", "This program implements the AdaBoost (or Adaptive "
 
 // Input for training.
 PARAM_MATRIX_IN("training", "Dataset for training AdaBoost.", "t");
-PARAM_UMATRIX_IN("labels", "Labels for the training set.", "l");
-
-// Loading/saving of a model.
-PARAM_STRING_IN("input_model_file", "File containing input AdaBoost model.",
-    "m", "");
-PARAM_STRING_OUT("output_model_file", "File to save trained AdaBoost model to.",
-    "M");
+PARAM_UROW_IN("labels", "Labels for the training set.", "l");
 
 // Classification options.
 PARAM_MATRIX_IN("test", "Test dataset.", "T");
-PARAM_UMATRIX_OUT("output", "Predicted labels for the test set.", "o");
+PARAM_UROW_OUT("output", "Predicted labels for the test set.", "o");
 
 // Training options.
 PARAM_INT_IN("iterations", "The maximum number of boosting iterations to be run"
@@ -92,125 +86,10 @@ PARAM_DOUBLE_IN("tolerance", "The tolerance for change in values of the "
 PARAM_STRING_IN("weak_learner", "The type of weak learner to use: "
     "'decision_stump', or 'perceptron'.", "w", "decision_stump");
 
-/**
- * The model to save to disk.
- */
-class AdaBoostModel
-{
- public:
-  enum WeakLearnerTypes
-  {
-    DECISION_STUMP,
-    PERCEPTRON
-  };
-
- private:
-  //! The mappings for the labels.
-  Col<size_t> mappings;
-  //! The type of weak learner.
-  size_t weakLearnerType;
-  //! Non-NULL if using decision stumps.
-  AdaBoost<DecisionStump<>>* dsBoost;
-  //! Non-NULL if using perceptrons.
-  AdaBoost<Perceptron<>>* pBoost;
-  //! Number of dimensions in training data.
-  size_t dimensionality;
-
- public:
-  //! Create an empty AdaBoost model.
-  AdaBoostModel() : dsBoost(NULL), pBoost(NULL), dimensionality(0) { }
-
-  //! Create the AdaBoost model with the given mappings and type.
-  AdaBoostModel(const Col<size_t>& mappings, const size_t weakLearnerType) :
-      mappings(mappings),
-      weakLearnerType(weakLearnerType),
-      dsBoost(NULL),
-      pBoost(NULL),
-      dimensionality(0)
-  {
-    // Nothing to do.
-  }
-
-  ~AdaBoostModel()
-  {
-    if (dsBoost)
-      delete dsBoost;
-    if (pBoost)
-      delete pBoost;
-  }
-
-  //! Get the mappings.
-  const Col<size_t>& Mappings() const { return mappings; }
-  //! Modify the mappings.
-  Col<size_t>& Mappings() { return mappings; }
-
-  //! Get the weak learner type.
-  size_t WeakLearnerType() const { return weakLearnerType; }
-  //! Modify the weak learner type.
-  size_t& WeakLearnerType() { return weakLearnerType; }
-
-  //! Get the dimensionality of the model.
-  size_t Dimensionality() const { return dimensionality; }
-  //! Modify the dimensionality of the model.
-  size_t& Dimensionality() { return dimensionality; }
-
-  //! Train the model.
-  void Train(const mat& data,
-             const Row<size_t>& labels,
-             const size_t iterations,
-             const double tolerance)
-  {
-    dimensionality = data.n_rows;
-    if (weakLearnerType == WeakLearnerTypes::DECISION_STUMP)
-    {
-      if (dsBoost)
-        delete dsBoost;
-
-      DecisionStump<> ds(data, labels, max(labels) + 1);
-      dsBoost = new AdaBoost<DecisionStump<>>(data, labels, ds, iterations,
-          tolerance);
-    }
-    else if (weakLearnerType == WeakLearnerTypes::PERCEPTRON)
-    {
-      Perceptron<> p(data, labels, max(labels) + 1);
-      pBoost = new AdaBoost<Perceptron<>>(data, labels, p, iterations,
-          tolerance);
-    }
-  }
-
-  //! Classify test points.
-  void Classify(const mat& testData, Row<size_t>& predictions)
-  {
-    if (weakLearnerType == WeakLearnerTypes::DECISION_STUMP)
-      dsBoost->Classify(testData, predictions);
-    else if (weakLearnerType == WeakLearnerTypes::PERCEPTRON)
-      pBoost->Classify(testData, predictions);
-  }
-
-  //! Serialize the model.
-  template<typename Archive>
-  void Serialize(Archive& ar, const unsigned int /* version */)
-  {
-    if (Archive::is_loading::value)
-    {
-      if (dsBoost)
-        delete dsBoost;
-      if (pBoost)
-        delete pBoost;
-
-      dsBoost = NULL;
-      pBoost = NULL;
-    }
-
-    ar & data::CreateNVP(mappings, "mappings");
-    ar & data::CreateNVP(weakLearnerType, "weakLearnerType");
-    if (weakLearnerType == WeakLearnerTypes::DECISION_STUMP)
-      ar & data::CreateNVP(dsBoost, "adaboost_ds");
-    else if (weakLearnerType == WeakLearnerTypes::PERCEPTRON)
-      ar & data::CreateNVP(pBoost, "adaboost_p");
-    ar & data::CreateNVP(dimensionality, "dimensionality");
-  }
-};
+// Loading/saving of a model.
+PARAM_MODEL_IN(AdaBoostModel, "input_model", "Input AdaBoost model.", "m");
+PARAM_MODEL_OUT(AdaBoostModel, "output_model", "Output trained AdaBoost model.",
+    "M");
 
 int main(int argc, char *argv[])
 {
@@ -219,14 +98,14 @@ int main(int argc, char *argv[])
   // Check input parameters and issue warnings/errors as necessary.
 
   // The user cannot specify both a training file and an input model file.
-  if (CLI::HasParam("training") && CLI::HasParam("input_model_file"))
+  if (CLI::HasParam("training") && CLI::HasParam("input_model"))
   {
     Log::Fatal << "Only one of --training_file or --input_model_file may be "
         << "specified!" << endl;
   }
 
   // The user must specify either a training file or an input model file.
-  if (!CLI::HasParam("training") && !CLI::HasParam("input_model_file"))
+  if (!CLI::HasParam("training") && !CLI::HasParam("input_model"))
   {
     Log::Fatal << "Either --training_file or --input_model_file must be "
         << "specified!" << endl;
@@ -255,7 +134,7 @@ int main(int argc, char *argv[])
   }
 
   // If a weak learner is specified with a model, it will be ignored.
-  if (CLI::HasParam("input_model_file") && CLI::HasParam("weak_learner"))
+  if (CLI::HasParam("input_model") && CLI::HasParam("weak_learner"))
   {
     Log::Warn << "--weak_learner ignored because --input_model_file is "
         << "specified." << endl;
@@ -273,7 +152,7 @@ int main(int argc, char *argv[])
         << "passed." << endl;
   }
 
-  if (!CLI::HasParam("output_model_file") && !CLI::HasParam("output"))
+  if (!CLI::HasParam("output_model") && !CLI::HasParam("output"))
   {
     Log::Warn << "Neither --output_model_file nor --output_file are specified; "
         << "no results will be saved." << endl;
@@ -291,25 +170,20 @@ int main(int argc, char *argv[])
     mat trainingData = std::move(CLI::GetParam<arma::mat>("training"));
 
     // Load labels.
-    arma::Mat<size_t> labelsIn;
+    arma::Row<size_t> labelsIn;
 
     if (CLI::HasParam("labels"))
     {
       // Load labels.
-      labelsIn = std::move(CLI::GetParam<arma::Mat<size_t>>("labels"));
-
-      if (labelsIn.n_rows > 1)
-        labelsIn = labelsIn.t();
-      if (labelsIn.n_rows > 1)
-        Log::Fatal << "Labels must be one-dimensional!" << std::endl;
+      labelsIn = std::move(CLI::GetParam<arma::Row<size_t>>("labels"));
     }
     else
     {
       // Extract the labels as the last dimension of the training data.
       Log::Info << "Using the last dimension of training set as labels."
           << endl;
-      labelsIn = conv_to<Mat<size_t>>::from(
-          trainingData.row(trainingData.n_rows - 1)).t();
+      labelsIn = conv_to<Row<size_t>>::from(
+          trainingData.row(trainingData.n_rows - 1));
       trainingData.shed_row(trainingData.n_rows - 1);
     }
 
@@ -317,7 +191,7 @@ int main(int argc, char *argv[])
     Row<size_t> labels;
 
     // Normalize the labels.
-    data::NormalizeLabels(labelsIn.row(0), labels, m.Mappings());
+    data::NormalizeLabels(labelsIn, labels, m.Mappings());
 
     // Get other training parameters.
     const double tolerance = CLI::GetParam<double>("tolerance");
@@ -334,9 +208,8 @@ int main(int argc, char *argv[])
   }
   else
   {
-    // We have a specified input model file.
-    const string inputModelFile = CLI::GetParam<string>("input_model_file");
-    data::Load(inputModelFile, "adaboost_model", m, true); // Fatal on failure.
+    // We have a specified input model.
+    m = std::move(CLI::GetParam<AdaBoostModel>("input_model"));
   }
 
   // Perform classification, if desired.
@@ -358,10 +231,12 @@ int main(int argc, char *argv[])
     data::RevertLabels(predictedLabels, m.Mappings(), results);
 
     if (CLI::HasParam("output"))
-      CLI::GetParam<arma::Mat<size_t>>("output") = std::move(results);
+      CLI::GetParam<arma::Row<size_t>>("output") = std::move(results);
   }
 
   // Should we save the model, too?
-  if (CLI::HasParam("output_model_file"))
-    data::Save(CLI::GetParam<string>("output_model_file"), "adaboost_model", m);
+  if (CLI::HasParam("output_model"))
+    CLI::GetParam<AdaBoostModel>("output_model") = std::move(m);
+
+  CLI::Destroy();
 }

@@ -16,12 +16,12 @@
 BOOST_AUTO_TEST_SUITE(ind2subTest);
 
 /**
- * This test checks whether ind2sub and sub2ind are 
+ * This test checks whether ind2sub and sub2ind are
  * compiled successfully and that they function properly.
  */
 BOOST_AUTO_TEST_CASE(ind2sub_test)
 {
-  arma::mat A = arma::randu(4,5);
+  arma::mat A = arma::randu(4, 5);
   size_t index = 13;
   arma::uvec u = arma::ind2sub(arma::size(A), index);
 

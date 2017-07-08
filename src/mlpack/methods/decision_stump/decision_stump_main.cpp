@@ -10,7 +10,7 @@
  * http://www.opensource.org/licenses/BSD-3-Clause for more information.
  */
 #include <mlpack/prereqs.hpp>
-#include <mlpack/core/util/param.hpp>
+#include <mlpack/core/util/cli.hpp>
 #include <mlpack/core/data/normalize_labels.hpp>
 #include "decision_stump.hpp"
 
@@ -59,22 +59,13 @@ PROGRAM_INFO("Decision Stump",
 
 // Datasets we might load.
 PARAM_MATRIX_IN("training", "The dataset to train on.", "t");
-PARAM_UMATRIX_IN("labels", "Labels for the training set. If not specified, the "
+PARAM_UROW_IN("labels", "Labels for the training set. If not specified, the "
     "labels are assumed to be the last row of the training data.", "l");
 PARAM_MATRIX_IN("test", "A dataset to calculate predictions for.", "T");
 
 // Output.
-PARAM_UMATRIX_OUT("predictions", "The output matrix that will hold the "
+PARAM_UROW_OUT("predictions", "The output matrix that will hold the "
     "predicted labels for the test set.", "p");
-
-// We may load or save a model.
-PARAM_STRING_IN("input_model_file", "File containing decision stump model to "
-    "load.", "m", "");
-PARAM_STRING_OUT("output_model_file", "File to save trained decision stump "
-    "model to.", "M");
-
-PARAM_INT_IN("bucket_size", "The minimum number of training points in each "
-    "decision stump bucket.", "b", 6);
 
 /**
  * This is the structure that actually saves to disk.  We have to save the
@@ -97,25 +88,34 @@ struct DSModel
   }
 };
 
+// We may load or save a model.
+PARAM_MODEL_IN(DSModel, "input_model", "Decision stump model to "
+    "load.", "m");
+PARAM_MODEL_OUT(DSModel, "output_model", "Output decision stump model to save.",
+    "M");
+
+PARAM_INT_IN("bucket_size", "The minimum number of training points in each "
+    "decision stump bucket.", "b", 6);
+
 int main(int argc, char *argv[])
 {
   CLI::ParseCommandLine(argc, argv);
 
   // Check that the parameters are reasonable.
-  if (CLI::HasParam("training") && CLI::HasParam("input_model_file"))
+  if (CLI::HasParam("training") && CLI::HasParam("input_model"))
   {
     Log::Fatal << "Both --training_file and --input_model_file are specified, "
         << "but a trained model cannot be retrained.  Only one of these options"
         << " may be specified." << endl;
   }
 
-  if (!CLI::HasParam("training") && !CLI::HasParam("input_model_file"))
+  if (!CLI::HasParam("training") && !CLI::HasParam("input_model"))
   {
     Log::Fatal << "Neither --training_file nor --input_model_file are given; "
         << "one must be specified." << endl;
   }
 
-  if (!CLI::HasParam("output_model_file") && !CLI::HasParam("predictions"))
+  if (!CLI::HasParam("output_model") && !CLI::HasParam("predictions"))
   {
     Log::Warn << "Neither --output_model_file nor --predictions_file are "
         << "specified; no results will be saved!" << endl;
@@ -128,16 +128,10 @@ int main(int argc, char *argv[])
     mat trainingData = std::move(CLI::GetParam<mat>("training"));
 
     // Load labels, if necessary.
-    Mat<size_t> labelsIn;
+    Row<size_t> labelsIn;
     if (CLI::HasParam("labels"))
     {
-      labelsIn = std::move(CLI::GetParam<Mat<size_t>>("labels"));
-
-      // Do the labels need to be transposed?
-      if (labelsIn.n_cols == 1)
-        labelsIn = labelsIn.t();
-      if (labelsIn.n_cols == 1)
-        Log::Fatal << "Labels must be one-dimensional!" << endl;
+      labelsIn = std::move(CLI::GetParam<Row<size_t>>("labels"));
     }
     else
     {
@@ -145,14 +139,14 @@ int main(int argc, char *argv[])
       Log::Info << "Using the last dimension of training set as labels."
           << endl;
 
-      labelsIn = arma::conv_to<arma::Mat<size_t>>::from(
-          trainingData.row(trainingData.n_rows - 1).t());
+      labelsIn = arma::conv_to<arma::Row<size_t>>::from(
+          trainingData.row(trainingData.n_rows - 1));
       trainingData.shed_row(trainingData.n_rows - 1);
     }
 
     // Normalize the labels.
     Row<size_t> labels;
-    data::NormalizeLabels(labelsIn.row(0), labels, model.mappings);
+    data::NormalizeLabels(labelsIn, labels, model.mappings);
 
     const size_t bucketSize = CLI::GetParam<int>("bucket_size");
     const size_t classes = labels.max() + 1;
@@ -163,8 +157,7 @@ int main(int argc, char *argv[])
   }
   else
   {
-    const string inputModelFile = CLI::GetParam<string>("input_model_file");
-    data::Load(inputModelFile, "decision_stump_model", model, true);
+    model = std::move(CLI::GetParam<DSModel>("input_model"));
   }
 
   // Now, do we need to do any testing?
@@ -189,13 +182,14 @@ int main(int argc, char *argv[])
       Row<size_t> actualLabels;
       data::RevertLabels(predictedLabels, model.mappings, actualLabels);
 
-      // Save the predicted labels in a transposed form as output.
-      CLI::GetParam<Mat<size_t>>("predictions") = std::move(actualLabels);
+      // Save the predicted labels as output.
+      CLI::GetParam<Row<size_t>>("predictions") = std::move(actualLabels);
     }
   }
 
   // Save the model, if desired.
-  if (CLI::HasParam("output_model_file"))
-    data::Save(CLI::GetParam<string>("output_model_file"),
-        "decision_stump_model", model);
+  if (CLI::HasParam("output_model"))
+    CLI::GetParam<DSModel>("output_model") = std::move(model);
+
+  CLI::Destroy();
 }
